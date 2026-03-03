@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { useAuthSession } from '@/hooks/use-auth-session';
+import { calculatePointsForWalk, METERS_PER_MILE, metersToMiles } from '@/lib/points';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 
 type WalkEntry = {
@@ -21,17 +22,9 @@ type WalkEntry = {
   walked_at: string;
 };
 
-const POINTS_PER_MILE = 100;
-const METERS_PER_MILE = 1609.34;
-const STEPS_PER_MILE = 2000;
-
-function metersToMiles(meters: number) {
-  return meters / METERS_PER_MILE;
-}
-
 export default function DistanceScreen() {
   const router = useRouter();
-  const { session } = useAuthSession();
+  const { session, isLoading } = useAuthSession();
   const [walks, setWalks] = useState<WalkEntry[]>([]);
   const [distanceInput, setDistanceInput] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -52,7 +45,7 @@ export default function DistanceScreen() {
   const parsedDistance = Number.parseFloat(distanceInput);
   const pointsPreview =
     Number.isFinite(parsedDistance) && parsedDistance > 0
-      ? Math.round(parsedDistance * POINTS_PER_MILE)
+      ? calculatePointsForWalk(parsedDistance)
       : 0;
 
   const loadWalks = useCallback(async () => {
@@ -74,8 +67,7 @@ export default function DistanceScreen() {
       .from('walks')
       .select('id,distance_meters,points_earned,walked_at')
       .eq('user_id', session.user.id)
-      .order('walked_at', { ascending: false })
-      .limit(25);
+      .order('walked_at', { ascending: false });
 
     if (error) {
       setErrorMessage(error.message);
@@ -90,7 +82,7 @@ export default function DistanceScreen() {
       walked_at: entry.walked_at,
     }));
 
-    setWalks(normalizedEntries);
+    setWalks(normalizedEntries.slice(0, 25));
     setIsFetching(false);
   }, [session?.user.id]);
 
@@ -117,9 +109,8 @@ export default function DistanceScreen() {
     }
 
     const miles = Number(parsedDistance.toFixed(2));
-    const pointsEarned = Math.round(miles * POINTS_PER_MILE);
+    const pointsEarned = calculatePointsForWalk(miles);
     const distanceMeters = Number((miles * METERS_PER_MILE).toFixed(2));
-    const estimatedSteps = Math.max(1, Math.round(miles * STEPS_PER_MILE));
 
     setIsSaving(true);
 
@@ -127,7 +118,6 @@ export default function DistanceScreen() {
       user_id: session.user.id,
       distance_meters: distanceMeters,
       points_earned: pointsEarned,
-      steps: estimatedSteps,
     });
 
     setIsSaving(false);
@@ -156,6 +146,16 @@ export default function DistanceScreen() {
 
     router.replace('/login');
   };
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#2f7f65" />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -239,6 +239,11 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#d9ece5',
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   content: {
     padding: 20,

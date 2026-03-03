@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 
+import { signInWithSocialOAuth, type SocialAuthProvider } from '@/lib/oauth';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 
 export default function LoginScreen() {
@@ -19,6 +20,8 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [oauthProviderInFlight, setOauthProviderInFlight] = useState<SocialAuthProvider | null>(null);
+  const isBusy = isSubmitting || Boolean(oauthProviderInFlight);
 
   const handleLogin = async () => {
     setErrorMessage(null);
@@ -46,6 +49,26 @@ export default function LoginScreen() {
 
     if (error) {
       setErrorMessage(error.message);
+      return;
+    }
+
+    router.replace('/(tabs)/distance');
+  };
+
+  const handleSocialSignIn = async (provider: SocialAuthProvider) => {
+    setErrorMessage(null);
+
+    if (!isSupabaseConfigured) {
+      setErrorMessage('Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY first.');
+      return;
+    }
+
+    setOauthProviderInFlight(provider);
+    const { error } = await signInWithSocialOAuth(provider);
+    setOauthProviderInFlight(null);
+
+    if (error) {
+      setErrorMessage(error);
       return;
     }
 
@@ -92,11 +115,41 @@ export default function LoginScreen() {
           {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
           <Pressable
-            disabled={isSubmitting}
-            style={[styles.primaryButton, isSubmitting ? styles.buttonDisabled : undefined]}
+            disabled={isBusy}
+            style={[styles.primaryButton, isBusy ? styles.buttonDisabled : undefined]}
             onPress={handleLogin}>
             <Text style={styles.primaryButtonText}>{isSubmitting ? 'Signing in...' : 'Log In'}</Text>
           </Pressable>
+
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          <Pressable
+            disabled={isBusy}
+            style={[styles.socialButton, isBusy ? styles.socialButtonDisabled : undefined]}
+            onPress={() => {
+              void handleSocialSignIn('google');
+            }}>
+            <Text style={styles.socialButtonText}>
+              {oauthProviderInFlight === 'google' ? 'Connecting Google...' : 'Continue with Google'}
+            </Text>
+          </Pressable>
+
+          {Platform.OS === 'ios' ? (
+            <Pressable
+              disabled={isBusy}
+              style={[styles.socialButton, isBusy ? styles.socialButtonDisabled : undefined]}
+              onPress={() => {
+                void handleSocialSignIn('apple');
+              }}>
+              <Text style={styles.socialButtonText}>
+                {oauthProviderInFlight === 'apple' ? 'Connecting Apple...' : 'Continue with Apple'}
+              </Text>
+            </Pressable>
+          ) : null}
 
           <Link href="/signup" asChild>
             <Pressable style={styles.secondaryAction}>
@@ -190,6 +243,38 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: '#ffffff',
     fontWeight: '700',
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#b4d8ca',
+  },
+  dividerText: {
+    marginHorizontal: 12,
+    color: '#2a5e4c',
+    fontSize: 16,
+  },
+  socialButton: {
+    height: 54,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#2f7f65',
+    backgroundColor: '#eef7f2',
+  },
+  socialButtonDisabled: {
+    opacity: 0.7,
+  },
+  socialButtonText: {
+    fontSize: 19,
+    color: '#1f4f3f',
+    fontWeight: '600',
   },
   secondaryAction: {
     alignItems: 'center',

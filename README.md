@@ -42,6 +42,12 @@ To learn more about developing your project with Expo, look at the following res
 - [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
 - [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
 
+## CI/CD
+
+- CI checks run from [.github/workflows/ci.yml](./.github/workflows/ci.yml).
+- EAS builds run from [.github/workflows/eas-build.yml](./.github/workflows/eas-build.yml).
+- Setup instructions are in [docs/setup/ci-cd.md](./docs/setup/ci-cd.md).
+
 ## Join the community
 
 Join our community of developers creating universal apps.

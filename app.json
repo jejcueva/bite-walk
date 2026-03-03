@@ -38,12 +38,18 @@
             "backgroundColor": "#000000"
           }
         }
-      ],
-      "expo-sqlite"
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f40de41a-a74a-4e75-be44-7fd9bf1866f5"
+      }
+    },
+    "owner": "heyseuscs-organization"
   }
 }

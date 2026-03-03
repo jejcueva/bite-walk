@@ -1,10 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Tabs } from 'expo-router';
+import { Redirect, Tabs } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { useAuthSession } from '@/hooks/use-auth-session';
-import { Redirect } from 'expo-router';
 
 export default function TabLayout() {
   const { session, isLoading } = useAuthSession();
