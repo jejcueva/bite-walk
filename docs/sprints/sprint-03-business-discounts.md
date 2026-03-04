@@ -135,10 +135,10 @@ const { data, error } = await supabase.rpc('redeem_deal', {
 
 ## Definition of Done
 
-- [ ] User can browse deals sorted by proximity
-- [ ] Category filters work correctly
-- [ ] Full redemption flow: select deal -> confirm -> QR code generated
-- [ ] Vouchers expire after 30 minutes (verified via DB constraint)
-- [ ] Business owner can create/edit deals via admin portal
-- [ ] Voucher validation endpoint returns correct status
-- [ ] Seed data loaded for Bay Area pilot businesses
+- [x] User can browse deals sorted by proximity
+- [x] Category filters work correctly
+- [x] Full redemption flow: select deal -> confirm -> QR code generated
+- [x] Vouchers expire after 30 minutes (verified via DB constraint)
+- [x] Business owner can create/edit deals via admin portal
+- [x] Voucher validation endpoint returns correct status
+- [x] Seed data loaded for Bay Area pilot businesses
