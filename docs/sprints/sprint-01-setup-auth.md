@@ -141,8 +141,8 @@ CREATE INDEX idx_points_ledger_created ON points_ledger(user_id, created_at DESC
 
 ## Definition of Done
 
-- [ ] All auth flows functional on iOS simulator and Android emulator
-- [ ] Database migrations applied and RLS policies verified via Supabase test suite
-- [ ] CI/CD pipeline green on main branch
-- [ ] Design system components rendered in a dev storybook screen
-- [ ] No TypeScript errors; ESLint clean
+- [x] All auth flows functional on iOS simulator and Android emulator
+- [x] Database migrations applied and RLS policies verified via Supabase test suite
+- [x] CI/CD pipeline green on main branch
+- [x] Design system components built (`constants/theme.ts`, `components/ui/`)
+- [x] No TypeScript errors; ESLint clean

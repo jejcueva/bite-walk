@@ -11,8 +11,12 @@ import {
   View,
 } from 'react-native';
 
+import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+
 import { useAuthSession } from '@/hooks/use-auth-session';
+import { useStepTracker } from '@/hooks/use-step-tracker';
 import { calculatePointsForWalk, METERS_PER_MILE, metersToMiles } from '@/lib/points';
+import { createWalkId, enqueueWalk, syncQueuedWalks } from '@/lib/offline-walk-queue';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 
 type WalkEntry = {
@@ -22,9 +26,107 @@ type WalkEntry = {
   walked_at: string;
 };
 
+type WeeklyWalkingChartProps = {
+  walks: WalkEntry[];
+};
+
+function startOfLocalDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function toLocalDayKey(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function WeeklyWalkingChart({ walks }: WeeklyWalkingChartProps) {
+  const data = useMemo(() => {
+    const today = startOfLocalDay(new Date());
+
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const day = new Date(today);
+      day.setDate(today.getDate() - (6 - i));
+      return day;
+    });
+
+    const keys = new Set(days.map(toLocalDayKey));
+    const totalsByKey = new Map<string, number>();
+    keys.forEach((k) => totalsByKey.set(k, 0));
+
+    for (const w of walks) {
+      const walkedAt = new Date(w.walked_at);
+      const key = toLocalDayKey(startOfLocalDay(walkedAt));
+      if (!totalsByKey.has(key)) continue;
+      totalsByKey.set(key, (totalsByKey.get(key) ?? 0) + metersToMiles(w.distance_meters));
+    }
+
+    const weekdayInitial = (d: Date) => ['S', 'M', 'T', 'W', 'T', 'F', 'S'][d.getDay()] ?? '?';
+
+    return days.map((day) => {
+      const key = toLocalDayKey(day);
+      const miles = totalsByKey.get(key) ?? 0;
+      return { key, label: weekdayInitial(day), miles };
+    });
+  }, [walks]);
+
+  const maxMiles = useMemo(() => Math.max(0, ...data.map((d) => d.miles)), [data]);
+  const chartMaxHeight = 120;
+
+  return (
+    <View style={styles.weeklyCard}>
+      <View style={styles.weeklyHeader}>
+        <Text style={styles.cardTitle}>This week</Text>
+        <Text style={styles.weeklyTotalText}>
+          {data.reduce((sum, d) => sum + d.miles, 0).toFixed(2)} mi
+        </Text>
+      </View>
+
+      <View style={styles.weeklyChart}>
+        <View style={styles.weeklyChartGridLine} />
+        <View style={styles.weeklyBarsRow}>
+          {data.map((d) => {
+            const height =
+              maxMiles <= 0 ? 2 : Math.max(4, Math.round((d.miles / maxMiles) * chartMaxHeight));
+
+            return (
+              <View key={d.key} style={styles.weeklyBarItem}>
+                <Text style={styles.weeklyBarValue}>{d.miles > 0 ? d.miles.toFixed(1) : ''}</Text>
+                <View style={[styles.weeklyBar, { height }]} />
+                <Text style={styles.weeklyBarLabel}>{d.label}</Text>
+              </View>
+            );
+          })}
+        </View>
+      </View>
+
+      <Text style={styles.weeklyHintText}>Last 7 days ending today</Text>
+    </View>
+  );
+}
+
+const normalizeWalkEntry = (entry: any): WalkEntry => ({
+  id: entry.id,
+  distance_meters: Number(entry.distance_meters),
+  points_earned: Number(entry.points_earned),
+  walked_at: entry.walked_at,
+});
+
+const sortAndLimit = (entries: WalkEntry[]): WalkEntry[] =>
+  entries
+    .slice()
+    .sort((a, b) => {
+      const aTime = a.walked_at ? Date.parse(a.walked_at) : 0;
+      const bTime = b.walked_at ? Date.parse(b.walked_at) : 0;
+      return bTime - aTime;
+    })
+    .slice(0, 25);
+
 export default function DistanceScreen() {
   const router = useRouter();
   const { session, isLoading } = useAuthSession();
+  const { todaySteps, todayDistance, permissionStatus } = useStepTracker();
   const [walks, setWalks] = useState<WalkEntry[]>([]);
   const [distanceInput, setDistanceInput] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -75,20 +177,64 @@ export default function DistanceScreen() {
       return;
     }
 
-    const normalizedEntries: WalkEntry[] = (data ?? []).map((entry) => ({
-      id: entry.id,
-      distance_meters: Number(entry.distance_meters),
-      points_earned: Number(entry.points_earned),
-      walked_at: entry.walked_at,
-    }));
+    const normalizedEntries: WalkEntry[] = (data ?? []).map(normalizeWalkEntry);
 
-    setWalks(normalizedEntries.slice(0, 25));
+    setWalks(sortAndLimit(normalizedEntries));
     setIsFetching(false);
   }, [session?.user.id]);
 
   useEffect(() => {
     void loadWalks();
   }, [loadWalks]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    const userId = session?.user.id;
+    if (!userId) return;
+
+    const channel = supabase
+      .channel(`walks:${userId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'walks', filter: `user_id=eq.${userId}` },
+        (payload: RealtimePostgresChangesPayload<any>) => {
+          const incoming = normalizeWalkEntry(payload.new);
+
+          setWalks((prev) => {
+            const idx = prev.findIndex((w) => w.id === incoming.id);
+            const next =
+              idx >= 0
+                ? prev.map((w) => (w.id === incoming.id ? incoming : w))
+                : [incoming, ...prev];
+
+            return sortAndLimit(next);
+          });
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'walks', filter: `user_id=eq.${userId}` },
+        (payload: RealtimePostgresChangesPayload<any>) => {
+          const incoming = normalizeWalkEntry(payload.new);
+          setWalks((prev) => sortAndLimit(prev.map((w) => (w.id === incoming.id ? incoming : w))));
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'walks', filter: `user_id=eq.${userId}` },
+        (payload: RealtimePostgresChangesPayload<any>) => {
+          const deletedId = (payload.old as any)?.id;
+          if (!deletedId) return;
+
+          setWalks((prev) => prev.filter((w) => w.id !== deletedId));
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session?.user.id]);
 
   const handleSaveDistance = async () => {
     setErrorMessage(null);
@@ -114,16 +260,29 @@ export default function DistanceScreen() {
 
     setIsSaving(true);
 
+    void syncQueuedWalks({ supabase, userId: session.user.id });
+
+    const walkId = createWalkId();
     const { error } = await supabase.from('walks').insert({
+      id: walkId,
       user_id: session.user.id,
       distance_meters: distanceMeters,
       points_earned: pointsEarned,
+      source: 'manual',
     });
 
     setIsSaving(false);
 
     if (error) {
-      setErrorMessage(error.message);
+      await enqueueWalk({
+        walkId,
+        userId: session.user.id,
+        distanceMeters,
+        pointsEarned,
+        source: 'manual',
+      });
+      setDistanceInput('');
+      setErrorMessage("Saved offline. We'll sync this walk when you're back online.");
       return;
     }
 
@@ -168,6 +327,18 @@ export default function DistanceScreen() {
           <Text style={styles.summarySubtext}>{totalMiles.toFixed(2)} miles total</Text>
           <Text style={styles.summarySubtext}>1.0 mile = 100 points</Text>
         </View>
+
+        {permissionStatus === 'granted' ? (
+          <View style={styles.stepCard}>
+            <Text style={styles.cardTitle}>{"Today's Steps"}</Text>
+            <Text style={styles.stepCount}>{todaySteps.toLocaleString()}</Text>
+            <Text style={styles.stepDistance}>
+              {todayDistance.toFixed(2)} miles · {calculatePointsForWalk(todayDistance)} pts
+            </Text>
+          </View>
+        ) : null}
+
+        <WeeklyWalkingChart walks={walks} />
 
         <View style={styles.entryCard}>
           <Text style={styles.cardTitle}>Log new walk</Text>
@@ -275,6 +446,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#366b58',
   },
+  stepCard: {
+    backgroundColor: '#c7e3d9',
+    borderRadius: 18,
+    padding: 18,
+    gap: 4,
+    alignItems: 'center',
+  },
+  stepCount: {
+    fontSize: 42,
+    fontWeight: '800',
+    color: '#0f4a38',
+  },
+  stepDistance: {
+    fontSize: 16,
+    color: '#366b58',
+  },
   entryCard: {
     backgroundColor: '#eef7f2',
     borderRadius: 18,
@@ -370,5 +557,68 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#2f7f65',
     fontWeight: '700',
+  },
+  weeklyCard: {
+    backgroundColor: '#eef7f2',
+    borderRadius: 18,
+    padding: 18,
+    gap: 12,
+  },
+  weeklyHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+  },
+  weeklyTotalText: {
+    fontSize: 15,
+    color: '#366b58',
+    fontWeight: '700',
+  },
+  weeklyChart: {
+    position: 'relative',
+    height: 160,
+    justifyContent: 'flex-end',
+  },
+  weeklyChartGridLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 24,
+    height: 1,
+    backgroundColor: '#b4d8ca',
+    opacity: 0.9,
+  },
+  weeklyBarsRow: {
+    height: 160,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    paddingHorizontal: 2,
+  },
+  weeklyBarItem: {
+    width: 34,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 6,
+  },
+  weeklyBarValue: {
+    height: 16,
+    fontSize: 12,
+    color: '#4b6f62',
+    fontWeight: '700',
+  },
+  weeklyBar: {
+    width: 18,
+    borderRadius: 10,
+    backgroundColor: '#2f7f65',
+  },
+  weeklyBarLabel: {
+    fontSize: 13,
+    color: '#1d4c3e',
+    fontWeight: '700',
+  },
+  weeklyHintText: {
+    fontSize: 13,
+    color: '#4b6f62',
   },
 });

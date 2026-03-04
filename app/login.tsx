@@ -151,6 +151,12 @@ export default function LoginScreen() {
             </Pressable>
           ) : null}
 
+          <Link href="/forgot-password" asChild>
+            <Pressable style={styles.forgotAction}>
+              <Text style={styles.forgotActionText}>Forgot Password</Text>
+            </Pressable>
+          </Link>
+
           <Link href="/signup" asChild>
             <Pressable style={styles.secondaryAction}>
               <Text style={styles.secondaryActionText}>Create new account</Text>
@@ -275,6 +281,15 @@ const styles = StyleSheet.create({
     fontSize: 19,
     color: '#1f4f3f',
     fontWeight: '600',
+  },
+  forgotAction: {
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  forgotActionText: {
+    fontSize: 16,
+    color: '#2f7f65',
+    fontWeight: '700',
   },
   secondaryAction: {
     alignItems: 'center',

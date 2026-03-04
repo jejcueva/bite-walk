@@ -109,9 +109,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 ## Definition of Done
 
-- [ ] Steps sync from HealthKit (iOS) and Google Fit (Android) in background
-- [ ] Points credited correctly at 100 pts/mile rate
-- [ ] Points balance updates in real-time via Supabase Realtime
-- [ ] Weekly chart renders accurate historical data
-- [ ] Offline walking data syncs on reconnect without duplicates
-- [ ] Unit tests pass for points calculation and transaction logic
+- [x] Steps sync from HealthKit (iOS) and Google Fit (Android) in background
+- [x] Points credited correctly at 100 pts/mile rate
+- [x] Points balance updates in real-time via Supabase Realtime
+- [x] Weekly chart renders accurate historical data
+- [x] Offline walking data syncs on reconnect without duplicates
+- [x] Unit tests pass for points calculation and transaction logic

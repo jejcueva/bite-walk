@@ -1,12 +1,28 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Redirect, Tabs } from 'expo-router';
-import React from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import React, { useEffect } from 'react';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 
 import { useAuthSession } from '@/hooks/use-auth-session';
+import { useStepTracker } from '@/hooks/use-step-tracker';
 
 export default function TabLayout() {
   const { session, isLoading } = useAuthSession();
+  const { permissionStatus } = useStepTracker();
+
+  useEffect(() => {
+    if (permissionStatus !== 'granted') return;
+    if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
+
+    void (async () => {
+      try {
+        const { registerBackgroundStepSync } = await import('@/lib/background-step-sync');
+        await registerBackgroundStepSync();
+      } catch {
+        // Background fetch may not be available (e.g. Expo Go)
+      }
+    })();
+  }, [permissionStatus]);
 
   if (isLoading) {
     return (
