@@ -275,9 +275,11 @@ create policy "deals_owner_manage" on public.deals for all to authenticated
 using (exists (select 1 from public.user_roles ur join public.businesses b on b.owner_id = ur.user_id where ur.user_id = auth.uid() and ur.role = 'business_owner' and b.id = deals.business_id))
 with check (exists (select 1 from public.user_roles ur join public.businesses b on b.owner_id = ur.user_id where ur.user_id = auth.uid() and ur.role = 'business_owner' and b.id = deals.business_id));
 
--- user_roles
 drop policy if exists "user_roles_self_view" on public.user_roles;
 create policy "user_roles_self_view" on public.user_roles for select to authenticated using (auth.uid() = user_id);
+drop policy if exists "user_roles_self_manage" on public.user_roles;
+create policy "user_roles_self_manage" on public.user_roles for insert to authenticated
+  with check (auth.uid() = user_id);
 
 -- vouchers
 drop policy if exists "vouchers_select_own" on public.vouchers;
@@ -478,14 +480,14 @@ $$;
 alter table public.deals add column if not exists image_url text;
 alter table public.deals add column if not exists subcategory text check (subcategory in ('breakfast', 'lunch', 'dinner', 'coffee', 'dessert', 'drinks', 'snacks'));
 
-create or replace view public.deals_with_businesses as
+drop view if exists public.deals_with_businesses;
+create or replace view public.deals_with_businesses
+with (security_invoker = true) as
 select d.id, d.title, d.description, d.image_url, d.subcategory, d.points_cost, d.original_price, d.discount_percent, d.is_premium_only, d.max_redemptions_per_day, d.is_active, d.created_at, d.expires_at,
   b.name as business_name, b.logo_url as business_logo_url, b.category, b.address, b.location
 from public.deals d
 join public.businesses b on b.id = d.business_id
 where d.is_active = true and b.is_active = true;
-
-alter view public.deals_with_businesses owner to postgres;
 
 -- ============================================================
 -- redeem_deal (ensures profile exists, 30-min voucher)
@@ -534,6 +536,16 @@ returns table (voucher_id uuid, status text, deal_title text, business_name text
 language plpgsql security definer as $$
 declare v_status text; v_expires_at timestamptz;
 begin
+  -- verify caller owns the business that owns this voucher's deal
+  if not exists (
+    select 1 from public.vouchers v
+    join public.deals d on d.id = v.deal_id
+    join public.businesses b on b.id = d.business_id
+    where v.id = p_voucher_id and b.owner_id = auth.uid()
+  ) then
+    raise exception 'voucher not found';
+  end if;
+
   select status, expires_at into v_status, v_expires_at from public.vouchers where id = p_voucher_id;
   if v_status is null then raise exception 'voucher not found'; end if;
   if v_status <> 'active' then raise exception 'voucher is not active'; end if;
