@@ -8,7 +8,7 @@ const {
   metersToMiles,
   STEPS_PER_MILE,
   stepsToMiles,
-} = require('../lib/points.ts');
+} = require('../packages/shared/src/points.ts');
 
 assert.equal(calculatePointsForWalk(0), 0);
 assert.equal(calculatePointsForWalk(-2), 0);

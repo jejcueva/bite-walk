@@ -96,6 +96,8 @@ create table if not exists public.deals (
   business_id uuid not null references public.businesses(id) on delete cascade,
   title text not null,
   description text,
+  image_url text,
+  subcategory text check (subcategory in ('breakfast', 'lunch', 'dinner', 'coffee', 'dessert', 'drinks', 'snacks')),
   points_cost integer not null check (points_cost > 0),
   original_price numeric(10,2),
   discount_percent integer check (discount_percent between 1 and 100),
@@ -130,6 +132,57 @@ create table if not exists public.vouchers (
 create index if not exists idx_vouchers_user on public.vouchers (user_id, created_at desc);
 create index if not exists idx_vouchers_status on public.vouchers (status) where status = 'active';
 
+create table if not exists public.favorites (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  deal_id uuid not null references public.deals(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (user_id, deal_id)
+);
+
+create table if not exists public.business_hours (
+  id uuid primary key default gen_random_uuid(),
+  business_id uuid not null references public.businesses(id) on delete cascade,
+  day_of_week integer not null check (day_of_week >= 0 and day_of_week <= 6),
+  open_time time,
+  close_time time,
+  is_closed boolean not null default false,
+  unique (business_id, day_of_week)
+);
+
+create index if not exists idx_favorites_user on public.favorites (user_id);
+create index if not exists idx_favorites_deal on public.favorites (deal_id);
+create index if not exists idx_business_hours_business on public.business_hours (business_id);
+
+-- ============================================================
+-- Daily goals & streaks (engagement loop)
+-- ============================================================
+
+create table if not exists public.daily_goals (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  goal_date date not null default current_date,
+  target_steps integer not null default 10000 check (target_steps > 0),
+  actual_steps integer not null default 0 check (actual_steps >= 0),
+  target_distance_meters numeric(10,2) not null default 8046.72 check (target_distance_meters > 0),
+  actual_distance_meters numeric(10,2) not null default 0 check (actual_distance_meters >= 0),
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, goal_date)
+);
+
+create index if not exists idx_daily_goals_user_date on public.daily_goals (user_id, goal_date desc);
+
+create table if not exists public.streaks (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  current_streak integer not null default 0 check (current_streak >= 0),
+  longest_streak integer not null default 0 check (longest_streak >= 0),
+  last_active_date date,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 -- ============================================================
 -- Indexes (core)
 -- ============================================================
@@ -151,6 +204,12 @@ create trigger set_walks_updated_at before update on public.walks for each row e
 drop trigger if exists set_discounts_updated_at on public.discounts;
 create trigger set_discounts_updated_at before update on public.discounts for each row execute function public.set_updated_at();
 
+drop trigger if exists set_daily_goals_updated_at on public.daily_goals;
+create trigger set_daily_goals_updated_at before update on public.daily_goals for each row execute function public.set_updated_at();
+
+drop trigger if exists set_streaks_updated_at on public.streaks;
+create trigger set_streaks_updated_at before update on public.streaks for each row execute function public.set_updated_at();
+
 -- ============================================================
 -- RLS
 -- ============================================================
@@ -163,6 +222,10 @@ alter table public.businesses enable row level security;
 alter table public.deals enable row level security;
 alter table public.user_roles enable row level security;
 alter table public.vouchers enable row level security;
+alter table public.favorites enable row level security;
+alter table public.business_hours enable row level security;
+alter table public.daily_goals enable row level security;
+alter table public.streaks enable row level security;
 
 -- profiles
 drop policy if exists "profiles_select_own" on public.profiles;
@@ -220,6 +283,38 @@ create policy "user_roles_self_view" on public.user_roles for select to authenti
 drop policy if exists "vouchers_select_own" on public.vouchers;
 create policy "vouchers_select_own" on public.vouchers for select to authenticated using (auth.uid() = user_id);
 
+-- favorites
+drop policy if exists "favorites_select_own" on public.favorites;
+create policy "favorites_select_own" on public.favorites for select to authenticated using (auth.uid() = user_id);
+drop policy if exists "favorites_insert_own" on public.favorites;
+create policy "favorites_insert_own" on public.favorites for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists "favorites_delete_own" on public.favorites;
+create policy "favorites_delete_own" on public.favorites for delete to authenticated using (auth.uid() = user_id);
+
+-- business_hours
+drop policy if exists "business_hours_select_public" on public.business_hours;
+create policy "business_hours_select_public" on public.business_hours for select to public using (true);
+drop policy if exists "business_hours_owner_manage" on public.business_hours;
+create policy "business_hours_owner_manage" on public.business_hours for all to authenticated
+using (exists (select 1 from public.businesses b where b.id = business_hours.business_id and b.owner_id = auth.uid()))
+with check (exists (select 1 from public.businesses b where b.id = business_hours.business_id and b.owner_id = auth.uid()));
+
+-- daily_goals
+drop policy if exists "daily_goals_select_own" on public.daily_goals;
+create policy "daily_goals_select_own" on public.daily_goals for select to authenticated using (auth.uid() = user_id);
+drop policy if exists "daily_goals_insert_own" on public.daily_goals;
+create policy "daily_goals_insert_own" on public.daily_goals for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists "daily_goals_update_own" on public.daily_goals;
+create policy "daily_goals_update_own" on public.daily_goals for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- streaks
+drop policy if exists "streaks_select_own" on public.streaks;
+create policy "streaks_select_own" on public.streaks for select to authenticated using (auth.uid() = user_id);
+drop policy if exists "streaks_insert_own" on public.streaks;
+create policy "streaks_insert_own" on public.streaks for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists "streaks_update_own" on public.streaks;
+create policy "streaks_update_own" on public.streaks for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
 -- ============================================================
 -- Seed: discounts (legacy slug-based)
 -- ============================================================
@@ -273,18 +368,118 @@ returns integer language sql stable security definer as $$
 $$;
 
 -- ============================================================
+-- Daily goal & streak functions
+-- ============================================================
+
+create or replace function public.get_or_create_daily_goal(p_user_id uuid, p_target_steps integer default 10000)
+returns public.daily_goals
+language plpgsql security definer as $$
+declare
+  v_goal public.daily_goals;
+  v_target_distance numeric(10,2);
+begin
+  v_target_distance := round((p_target_steps / 2112.0) * 1609.34, 2);
+  insert into public.daily_goals (user_id, goal_date, target_steps, target_distance_meters)
+  values (p_user_id, current_date, p_target_steps, v_target_distance)
+  on conflict (user_id, goal_date) do nothing;
+  select * into v_goal from public.daily_goals where user_id = p_user_id and goal_date = current_date;
+  return v_goal;
+end; $$;
+
+create or replace function public.update_daily_goal_progress(p_user_id uuid)
+returns public.daily_goals
+language plpgsql security definer as $$
+declare
+  v_goal public.daily_goals;
+  v_total_steps integer;
+  v_total_distance numeric(10,2);
+begin
+  perform public.get_or_create_daily_goal(p_user_id);
+  select coalesce(sum(steps), 0), coalesce(sum(distance_meters), 0)
+  into v_total_steps, v_total_distance
+  from public.walks where user_id = p_user_id and walked_at::date = current_date;
+  update public.daily_goals
+  set actual_steps = v_total_steps, actual_distance_meters = v_total_distance,
+      completed_at = case
+        when completed_at is null and (v_total_steps >= target_steps or v_total_distance >= target_distance_meters)
+        then now() else completed_at end
+  where user_id = p_user_id and goal_date = current_date returning * into v_goal;
+  if v_goal.completed_at is not null then perform public.update_streak(p_user_id); end if;
+  return v_goal;
+end; $$;
+
+create or replace function public.update_streak(p_user_id uuid)
+returns public.streaks
+language plpgsql security definer as $$
+declare
+  v_streak public.streaks;
+  v_yesterday date := current_date - 1;
+begin
+  insert into public.streaks (user_id, current_streak, longest_streak, last_active_date)
+  values (p_user_id, 0, 0, null) on conflict (user_id) do nothing;
+  select * into v_streak from public.streaks where user_id = p_user_id for update;
+  if v_streak.last_active_date = current_date then return v_streak; end if;
+  if v_streak.last_active_date = v_yesterday then
+    update public.streaks set current_streak = current_streak + 1,
+      longest_streak = greatest(longest_streak, current_streak + 1), last_active_date = current_date
+    where user_id = p_user_id returning * into v_streak;
+  else
+    update public.streaks set current_streak = 1,
+      longest_streak = greatest(longest_streak, 1), last_active_date = current_date
+    where user_id = p_user_id returning * into v_streak;
+  end if;
+  return v_streak;
+end; $$;
+
+create or replace function public.get_streak(p_user_id uuid)
+returns public.streaks
+language plpgsql stable security definer as $$
+declare v_streak public.streaks;
+begin
+  select * into v_streak from public.streaks where user_id = p_user_id;
+  if v_streak is null then return row(p_user_id, 0, 0, null, now(), now())::public.streaks; end if;
+  return v_streak;
+end; $$;
+
+-- ============================================================
 -- Realtime
 -- ============================================================
 
-alter publication supabase_realtime add table public.point_ledger;
-alter publication supabase_realtime add table public.walks;
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    if not exists (
+      select 1
+      from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = 'point_ledger'
+    ) then
+      alter publication supabase_realtime add table public.point_ledger;
+    end if;
+
+    if not exists (
+      select 1
+      from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = 'walks'
+    ) then
+      alter publication supabase_realtime add table public.walks;
+    end if;
+  end if;
+end;
+$$;
 
 -- ============================================================
 -- View: deals with businesses
 -- ============================================================
+-- Ensure deals has enhanced marketplace columns (if table already existed from older schema)
+alter table public.deals add column if not exists image_url text;
+alter table public.deals add column if not exists subcategory text check (subcategory in ('breakfast', 'lunch', 'dinner', 'coffee', 'dessert', 'drinks', 'snacks'));
 
 create or replace view public.deals_with_businesses as
-select d.id, d.title, d.description, d.points_cost, d.original_price, d.discount_percent, d.is_premium_only, d.max_redemptions_per_day, d.is_active, d.created_at, d.expires_at,
+select d.id, d.title, d.description, d.image_url, d.subcategory, d.points_cost, d.original_price, d.discount_percent, d.is_premium_only, d.max_redemptions_per_day, d.is_active, d.created_at, d.expires_at,
   b.name as business_name, b.logo_url as business_logo_url, b.category, b.address, b.location
 from public.deals d
 join public.businesses b on b.id = d.business_id
@@ -377,12 +572,46 @@ begin
 end; $$;
 
 -- ============================================================
+-- Favorites functions
+-- ============================================================
+
+create or replace function public.toggle_favorite(p_user_id uuid, p_deal_id uuid)
+returns boolean
+language plpgsql security definer as $$
+declare
+  v_exists boolean;
+begin
+  if p_user_id is null or p_deal_id is null then raise exception 'user_id and deal_id required'; end if;
+  if p_user_id <> auth.uid() then raise exception 'can only toggle own favorites'; end if;
+  select exists (select 1 from public.favorites where user_id = p_user_id and deal_id = p_deal_id) into v_exists;
+  if v_exists then
+    delete from public.favorites where user_id = p_user_id and deal_id = p_deal_id;
+    return false;
+  else
+    insert into public.favorites (user_id, deal_id) values (p_user_id, p_deal_id);
+    return true;
+  end if;
+end; $$;
+
+create or replace function public.get_favorite_deal_ids(p_user_id uuid)
+returns setof uuid
+language sql stable security definer as $$
+  select deal_id from public.favorites where user_id = p_user_id;
+$$;
+
+-- ============================================================
 -- Grants
 -- ============================================================
 
 grant execute on function public.get_points_balance(uuid) to authenticated;
 grant execute on function public.redeem_deal(uuid, uuid) to authenticated;
 grant execute on function public.get_nearby_deals(double precision, double precision, double precision) to authenticated;
+grant execute on function public.get_or_create_daily_goal(uuid, integer) to authenticated;
+grant execute on function public.update_daily_goal_progress(uuid) to authenticated;
+grant execute on function public.update_streak(uuid) to authenticated;
+grant execute on function public.get_streak(uuid) to authenticated;
+grant execute on function public.toggle_favorite(uuid, uuid) to authenticated;
+grant execute on function public.get_favorite_deal_ids(uuid) to authenticated;
 
 -- ============================================================
 -- Seed: Bay Area businesses + deals

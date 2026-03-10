@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Platform, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 
 import { useStepTracker } from '@/hooks/use-step-tracker';
+import { registerForPushNotifications } from '@/lib/push-notifications';
 
 const HEALTH_PERMISSION_KEY = 'health_permission_completed';
 
@@ -16,6 +17,7 @@ export default function HealthPermissionsScreen() {
   const router = useRouter();
   const { requestPermissions } = useStepTracker();
   const [isRequesting, setIsRequesting] = useState(false);
+  const [step, setStep] = useState<'health' | 'notifications'>('health');
 
   const platformName = Platform.OS === 'ios' ? 'Apple Health' : 'Health Connect';
   const rationale =
@@ -23,24 +25,75 @@ export default function HealthPermissionsScreen() {
       ? 'BiteWalk uses Apple Health to automatically count your steps and walking distance. Your health data stays on your device.'
       : 'BiteWalk uses Health Connect to automatically count your steps and walking distance. Your health data stays on your device.';
 
-  const handleEnable = async () => {
-    setIsRequesting(true);
-    await requestPermissions();
+  const finishOnboarding = async () => {
     await AsyncStorage.setItem(HEALTH_PERMISSION_KEY, 'true');
-    setIsRequesting(false);
     router.replace('/(tabs)/distance');
   };
 
-  const handleSkip = async () => {
-    await AsyncStorage.setItem(HEALTH_PERMISSION_KEY, 'true');
-    router.replace('/(tabs)/distance');
+  const handleEnableHealth = async () => {
+    setIsRequesting(true);
+    await requestPermissions();
+    setIsRequesting(false);
+    setStep('notifications');
   };
+
+  const handleSkipHealth = () => {
+    setStep('notifications');
+  };
+
+  const handleEnableNotifications = async () => {
+    setIsRequesting(true);
+    await registerForPushNotifications();
+    setIsRequesting(false);
+    await finishOnboarding();
+  };
+
+  const handleSkipNotifications = async () => {
+    await finishOnboarding();
+  };
+
+  if (step === 'notifications') {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.container}>
+          <View style={styles.content}>
+            <Text style={styles.icon}>&#x1F514;</Text>
+            <Text style={styles.title}>Stay on Track</Text>
+            <Text style={styles.subtitle}>
+              Get reminders about your walking goals and streak progress.
+            </Text>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Enable Notifications</Text>
+              <Text style={styles.cardBody}>
+                BiteWalk sends daily goal reminders and streak alerts so you never miss a day. You
+                can change this anytime in Settings.
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.buttons}>
+            <Pressable
+              disabled={isRequesting}
+              style={[styles.primaryButton, isRequesting ? styles.buttonDisabled : undefined]}
+              onPress={handleEnableNotifications}>
+              <Text style={styles.primaryButtonText}>
+                {isRequesting ? 'Requesting...' : 'Enable Notifications'}
+              </Text>
+            </Pressable>
+            <Pressable style={styles.skipButton} onPress={handleSkipNotifications}>
+              <Text style={styles.skipButtonText}>Skip for now</Text>
+            </Pressable>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <View style={styles.content}>
-          <Text style={styles.icon}>🚶</Text>
+          <Text style={styles.icon}>&#x1F6B6;</Text>
           <Text style={styles.title}>Track Your Steps</Text>
           <Text style={styles.subtitle}>
             Automatically earn points as you walk — no manual logging needed.
@@ -55,12 +108,12 @@ export default function HealthPermissionsScreen() {
           <Pressable
             disabled={isRequesting}
             style={[styles.primaryButton, isRequesting ? styles.buttonDisabled : undefined]}
-            onPress={handleEnable}>
+            onPress={handleEnableHealth}>
             <Text style={styles.primaryButtonText}>
               {isRequesting ? 'Requesting...' : 'Enable Step Tracking'}
             </Text>
           </Pressable>
-          <Pressable style={styles.skipButton} onPress={handleSkip}>
+          <Pressable style={styles.skipButton} onPress={handleSkipHealth}>
             <Text style={styles.skipButtonText}>Skip for now</Text>
           </Pressable>
         </View>

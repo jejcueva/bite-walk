@@ -1,3 +1,10 @@
+import {
+  DEAL_SUBCATEGORIES,
+  filterDealsBySubcategory,
+  formatDistance,
+  searchDeals,
+} from '@bitewalk/shared';
+import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -6,8 +13,10 @@ import {
   FlatList,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -24,15 +33,19 @@ type DealRow = {
   business_name: string;
   business_logo_url: string | null;
   category: string | null;
+  subcategory?: string | null;
   dist_meters?: number | null;
 };
 
 type DealCardProps = {
   deal: DealRow;
   onPress: () => void;
+  isFavorite: boolean;
+  onToggleFavorite: () => void;
 };
 
-function DealCard({ deal, onPress }: DealCardProps) {
+function DealCard({ deal, onPress, isFavorite, onToggleFavorite }: DealCardProps) {
+  const distStr = formatDistance(deal.dist_meters ?? null);
   return (
     <Pressable style={styles.card} onPress={onPress}>
       <View style={styles.cardHeader}>
@@ -54,11 +67,20 @@ function DealCard({ deal, onPress }: DealCardProps) {
           <Text style={styles.pointsValue}>{deal.points_cost}</Text>
           <Text style={styles.pointsLabel}>pts</Text>
         </View>
+        <Pressable
+          onPress={(e) => {
+            e.stopPropagation();
+            onToggleFavorite();
+          }}
+          hitSlop={8}
+          style={styles.favoriteButton}>
+          <Text style={[styles.favoriteIcon, isFavorite && styles.favoriteIconFilled]}>
+            {isFavorite ? '\u2665' : '\u2661'}
+          </Text>
+        </Pressable>
       </View>
       {deal.description ? <Text style={styles.dealDescription}>{deal.description}</Text> : null}
-      {deal.dist_meters != null && deal.dist_meters >= 0 ? (
-        <Text style={styles.distLabel}>{deal.dist_meters < 1000 ? `${Math.round(deal.dist_meters)} m` : `${(deal.dist_meters / 1000).toFixed(1)} km`}</Text>
-      ) : null}
+      {distStr ? <Text style={styles.distLabel}>{distStr}</Text> : null}
       {deal.category ? <Text style={styles.categoryLabel}>{deal.category}</Text> : null}
     </Pressable>
   );
@@ -69,17 +91,30 @@ export default function DiscountsScreen() {
   const { session } = useAuthSession();
 
   const [category, setCategory] = useState<DealCategory>('all');
+  const [subcategory, setSubcategory] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showFavorites, setShowFavorites] = useState(false);
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [deals, setDeals] = useState<DealRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const categories: DealCategory[] = ['all', 'food', 'drinks', 'retail', 'other'];
+  const subcategoryChips = ['all', ...DEAL_SUBCATEGORIES] as const;
 
   const filteredDeals = useMemo(() => {
-    if (category === 'all') return deals;
-    return deals.filter((d) => (d.category ?? '').toLowerCase() === category);
-  }, [category, deals]);
+    let result = deals;
+    if (category !== 'all') {
+      result = result.filter((d) => (d.category ?? '').toLowerCase() === category);
+    }
+    result = filterDealsBySubcategory(result, subcategory === 'all' ? null : subcategory);
+    result = searchDeals(result, searchQuery);
+    if (showFavorites) {
+      result = result.filter((d) => favoriteIds.has(d.id));
+    }
+    return result;
+  }, [category, subcategory, searchQuery, showFavorites, favoriteIds, deals]);
 
   const loadDeals = useCallback(async () => {
     if (!session?.user.id) {
@@ -125,6 +160,7 @@ export default function DiscountsScreen() {
             business_name: row.business_name,
             business_logo_url: row.business_logo_url,
             category: row.category,
+            subcategory: row.subcategory ?? null,
             dist_meters: row.dist_meters != null ? Number(row.dist_meters) : null,
           }));
           setDeals(rows);
@@ -134,13 +170,13 @@ export default function DiscountsScreen() {
 
       const { data, error: fetchError } = await supabase
         .from('deals_with_businesses')
-        .select('id,title,description,points_cost,business_name,business_logo_url,category')
+        .select('id,title,description,points_cost,business_name,business_logo_url,category,subcategory')
         .order('points_cost', { ascending: true });
 
       if (fetchError) {
         setError(fetchError.message);
       } else {
-        const rows: DealRow[] = (data ?? []).map((row) => ({
+        const rows: DealRow[] = (data ?? []).map((row: any) => ({
           id: row.id,
           title: row.title,
           description: row.description,
@@ -148,6 +184,7 @@ export default function DiscountsScreen() {
           business_name: row.business_name,
           business_logo_url: row.business_logo_url,
           category: row.category,
+          subcategory: row.subcategory ?? null,
           dist_meters: null,
         }));
         setDeals(rows);
@@ -158,13 +195,45 @@ export default function DiscountsScreen() {
     }
   }, [session?.user.id]);
 
+  const loadFavoriteIds = useCallback(async () => {
+    if (!session?.user.id || !isSupabaseConfigured) return;
+    const { data, error: rpcError } = await supabase.rpc('get_favorite_deal_ids', {
+      p_user_id: session.user.id,
+    });
+    if (!rpcError && data && Array.isArray(data)) {
+      setFavoriteIds(new Set((data as string[]).map(String)));
+    }
+  }, [session?.user.id]);
+
   useEffect(() => {
     void loadDeals();
   }, [loadDeals]);
 
+  useEffect(() => {
+    void loadFavoriteIds();
+  }, [loadFavoriteIds]);
+
+  const handleToggleFavorite = useCallback(
+    async (dealId: string) => {
+      if (!session?.user.id) return;
+      const { data: isNowFavorite } = await supabase.rpc('toggle_favorite', {
+        p_user_id: session.user.id,
+        p_deal_id: dealId,
+      });
+      setFavoriteIds((prev) => {
+        const next = new Set(prev);
+        if (isNowFavorite) next.add(dealId);
+        else next.delete(dealId);
+        return next;
+      });
+    },
+    [session?.user.id],
+  );
+
   const handleRefresh = () => {
     setIsRefreshing(true);
     void loadDeals();
+    void loadFavoriteIds();
   };
 
   return (
@@ -178,6 +247,19 @@ export default function DiscountsScreen() {
           <Pressable onPress={() => router.push('/business' as any)} style={styles.businessLinkWrap}>
             <Text style={styles.businessLink}>Business</Text>
           </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.searchRow}>
+        <View style={styles.searchInputWrap}>
+          <Ionicons name="search-outline" size={20} color="#4b6f62" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search deals..."
+            placeholderTextColor="#4b6f62"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
         </View>
       </View>
 
@@ -195,7 +277,35 @@ export default function DiscountsScreen() {
             </Pressable>
           );
         })}
+        <Pressable
+          onPress={() => setShowFavorites((v) => !v)}
+          style={[styles.chip, showFavorites ? styles.chipActive : styles.chipInactive]}>
+          <Text style={showFavorites ? styles.chipTextActive : styles.chipTextInactive}>
+            Favorites
+          </Text>
+        </Pressable>
       </View>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.subcategoryRow}
+        style={styles.subcategoryScroll}>
+        {subcategoryChips.map((sub) => {
+          const subVal = sub === 'all' ? null : sub;
+          const isActive = subcategory === subVal;
+          return (
+            <Pressable
+              key={sub}
+              onPress={() => setSubcategory(subVal)}
+              style={[styles.chip, isActive ? styles.chipActive : styles.chipInactive]}>
+              <Text style={isActive ? styles.chipTextActive : styles.chipTextInactive}>
+                {sub === 'all' ? 'All' : sub[0].toUpperCase() + sub.slice(1)}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -222,6 +332,8 @@ export default function DiscountsScreen() {
                   params: { id: item.id },
                 });
               }}
+              isFavorite={favoriteIds.has(item.id)}
+              onToggleFavorite={() => handleToggleFavorite(item.id)}
             />
           )}
         />
@@ -242,6 +354,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 8,
+  },
+  searchRow: {
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+  },
+  searchInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#eef7f2',
+    borderRadius: 999,
+    paddingHorizontal: 16,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: '#1d4c3e',
   },
   title: {
     fontSize: 32,
@@ -272,6 +404,26 @@ const styles = StyleSheet.create({
   chipTextInactive: {
     color: '#1d4c3e',
     fontWeight: '600',
+  },
+  subcategoryScroll: {
+    maxHeight: 44,
+    marginBottom: 8,
+  },
+  subcategoryRow: {
+    paddingHorizontal: 20,
+    gap: 8,
+    flexDirection: 'row',
+    paddingBottom: 8,
+  },
+  favoriteButton: {
+    padding: 4,
+  },
+  favoriteIcon: {
+    fontSize: 22,
+    color: '#4b6f62',
+  },
+  favoriteIconFilled: {
+    color: '#992b2b',
   },
   loadingContainer: {
     flex: 1,

@@ -105,5 +105,28 @@ $$;
 -- ============================================================
 
 -- Enable realtime publication on point_ledger and walks
-alter publication supabase_realtime add table public.point_ledger;
-alter publication supabase_realtime add table public.walks;
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    if not exists (
+      select 1
+      from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = 'point_ledger'
+    ) then
+      alter publication supabase_realtime add table public.point_ledger;
+    end if;
+
+    if not exists (
+      select 1
+      from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = 'walks'
+    ) then
+      alter publication supabase_realtime add table public.walks;
+    end if;
+  end if;
+end;
+$$;

@@ -12,6 +12,8 @@ export default function RootLayout() {
         <Stack.Screen name="forgot-password" />
         <Stack.Screen name="auth/callback" />
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="leaderboard" />
+        <Stack.Screen name="premium" />
       </Stack>
       <StatusBar style="dark" />
     </>

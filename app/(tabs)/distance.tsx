@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -14,10 +14,15 @@ import {
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 
 import { useAuthSession } from '@/hooks/use-auth-session';
+import { useDailyGoal } from '@/hooks/use-daily-goal';
 import { useStepTracker } from '@/hooks/use-step-tracker';
+import { useSubscription } from '@/hooks/use-subscription';
 import { calculatePointsForWalk, METERS_PER_MILE, metersToMiles } from '@/lib/points';
 import { createWalkId, enqueueWalk, syncQueuedWalks } from '@/lib/offline-walk-queue';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { ProgressRing } from '@/components/ui/ProgressRing';
+import { StreakBadge } from '@/components/ui/StreakBadge';
+import { PremiumBadge } from '@/components/ui/PremiumBadge';
 
 type WalkEntry = {
   id: string;
@@ -127,6 +132,8 @@ export default function DistanceScreen() {
   const router = useRouter();
   const { session, isLoading } = useAuthSession();
   const { todaySteps, todayDistance, permissionStatus } = useStepTracker();
+  const { goal, streak, progress, completed, streakStatus, refreshProgress } = useDailyGoal();
+  const { isPremium } = useSubscription();
   const [walks, setWalks] = useState<WalkEntry[]>([]);
   const [distanceInput, setDistanceInput] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -288,6 +295,7 @@ export default function DistanceScreen() {
 
     setDistanceInput('');
     await loadWalks();
+    void refreshProgress();
   };
 
   const handleSignOut = async () => {
@@ -321,11 +329,42 @@ export default function DistanceScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>Distance Walked</Text>
 
+        <View style={styles.dailyGoalCard}>
+          <ProgressRing
+            progress={progress}
+            completed={completed}
+            label={`${Math.round(progress * 100)}%`}
+            sublabel={completed ? 'Goal complete!' : `${goal?.actual_steps ?? 0} / ${goal?.target_steps ?? 10000} steps`}
+          />
+        </View>
+
+        {streak ? (
+          <StreakBadge
+            currentStreak={streak.current_streak}
+            longestStreak={streak.longest_streak}
+            status={streakStatus}
+          />
+        ) : null}
+
+        <Pressable style={styles.leaderboardButton} onPress={() => router.push('/leaderboard' as Href)}>
+          <Text style={styles.leaderboardButtonText}>Leaderboard</Text>
+          <Text style={styles.leaderboardArrow}>{'>'}</Text>
+        </Pressable>
+
+        {!isPremium ? (
+          <Pressable style={styles.premiumLink} onPress={() => router.push('/premium' as Href)}>
+            <Text style={styles.premiumLinkText}>Go Premium -- Earn 2x points</Text>
+            <Text style={styles.leaderboardArrow}>{'>'}</Text>
+          </Pressable>
+        ) : null}
+
         <View style={styles.summaryCard}>
-          <Text style={styles.pointsValue}>{totalPoints}</Text>
+          <View style={styles.pointsRow}>
+            <Text style={styles.pointsValue}>{totalPoints}</Text>
+            <PremiumBadge isActive={isPremium} variant="multiplier" />
+          </View>
           <Text style={styles.summaryLabel}>Reward Points</Text>
           <Text style={styles.summarySubtext}>{totalMiles.toFixed(2)} miles total</Text>
-          <Text style={styles.summarySubtext}>1.0 mile = 100 points</Text>
         </View>
 
         {permissionStatus === 'granted' ? (
@@ -425,6 +464,12 @@ const styles = StyleSheet.create({
     fontSize: 44,
     fontWeight: '700',
     color: '#1d4c3e',
+  },
+  dailyGoalCard: {
+    backgroundColor: '#eef7f2',
+    borderRadius: 18,
+    padding: 24,
+    alignItems: 'center',
   },
   summaryCard: {
     backgroundColor: '#c7e3d9',
@@ -620,5 +665,47 @@ const styles = StyleSheet.create({
   weeklyHintText: {
     fontSize: 13,
     color: '#4b6f62',
+  },
+  leaderboardButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#eef7f2',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderWidth: 1,
+    borderColor: '#2f7f65',
+  },
+  leaderboardButtonText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#2f7f65',
+  },
+  leaderboardArrow: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#2f7f65',
+  },
+  pointsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  premiumLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fdf6e3',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderWidth: 1,
+    borderColor: '#e6c85e',
+  },
+  premiumLinkText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#b8860b',
   },
 });
