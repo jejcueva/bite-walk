@@ -4,7 +4,7 @@
     "slug": "bite-walk",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/LOGO.png",
     "scheme": "bitewalk",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -17,27 +17,32 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/images/LOGO.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.health.READ_STEPS",
-        "android.permission.health.READ_DISTANCE"
-      ]
+        "android.permission.health.READ_DISTANCE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.WAKE_LOCK",
+        "android.permission.health.READ_STEPS",
+        "android.permission.health.READ_DISTANCE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.WAKE_LOCK"
+      ],
+      "package": "com.heyseusc.bitewalk"
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/LOGO.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/LOGO.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",
@@ -72,6 +77,12 @@
         "projectId": "f40de41a-a74a-4e75-be44-7fd9bf1866f5"
       }
     },
-    "owner": "heyseuscs-organization"
+    "owner": "heyseuscs-organization",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/f40de41a-a74a-4e75-be44-7fd9bf1866f5"
+    }
   }
 }
